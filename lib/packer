@@ -1,0 +1,160 @@
+#!/usr/bin/perl 
+
+use strict;
+
+#Set up some globalish variables- charset for the encoding on the log file
+#srclog for the log file, root dir for the base directory, and loglines for data
+my $CHARSET = "utf-8";
+my $SRCLOG;
+my $ROOTDIR;
+my @loglines;
+#function for warn about usage and exit 
+sub usage{
+  warn "Usage: pkgGen <path to logGen output txt file> <path of pkg fauxroot>\n";
+  exit(1);
+}
+
+#function for checking arguments
+sub getarguments{
+  
+  #we need arguments
+  if($#ARGV == -1){
+    &usage;
+    exit(0);
+    
+    #and only 2
+  }elsif($#ARGV != 1){
+    &usage;
+    exit(0);
+  }
+  
+  #so if we have them, set the two args
+  $SRCLOG = shift @ARGV;
+  $ROOTDIR= shift @ARGV;
+  
+  #if the log file doesn't exist, quit now.
+  unless(-e $SRCLOG){
+    &usage;
+    exit(0);
+  }
+}
+
+#first line actually run- check the arguments.
+&getarguments;
+
+#create the root directory with default perms of root:admin, 1775 (sticky bit)
+mkdir($ROOTDIR) or die ("Could not create $ROOTDIR");
+chown "root","admin", $ROOTDIR;
+chmod oct("1775"), $ROOTDIR;
+
+#open the log file, and read it in
+open FILE , "<:encoding($CHARSET)", $SRCLOG or die ("Could not open log file $SRCLOG");
+# Split the log file into an array of lines to loop through
+@loglines = <FILE>;
+close FILE;
+
+#loop through the lines
+for my $line (@loglines)
+{
+  #any matches to this unless statement are lines you do not want parsed
+  # if the script dies due to meaningless filler info like the date, install 
+  # mesages - anything not referring to a file, add them here to be ignored
+  unless ( 
+	$line =~ /(setuid|setgid|sticky_bit|world_writable) \)$/ || 
+	# ABOVE: Only paths we don't need are theese.
+	$line =~ /^[^\/](.*)/ ) # Any line that doesn't with a solidus we junk
+  {
+     # set up some variables for use within the loop- type for file type, file
+     # for file path
+     my $type;
+     my $file;
+     if ($line =~ /(.*)\/$/)
+     {
+       $type = "dir";
+       $file = "$1";
+     #  print "Dir: $file\n";
+     }
+      else
+      { 
+	     #check to see if it's a file
+	     if ($line =~ /(.*)$/)
+	      {
+	        #set that it's a file, and save the path.
+	        $type = "file";
+	        $file = "$1";
+	       # print "File: $file\n";
+	      }
+        else
+        {
+          #otherwise, I don't know what the line means, so quit and say what 
+          #the line was
+          print "Unknown line: $line\n";
+          die("Exiting prematurely...");
+        }
+      }
+      #get an array of directories leading up to the file
+        my @dirs = split "/" , $file;
+        my $dir;
+        my $count = scalar(@dirs);
+        
+        #loop through all but the file/directory name itself
+        for (my $i = 0; $i < $count - 1; $i++)
+        {
+          #grab the next directory in the array
+          $dir .= shift @dirs;
+          $dir .= "/";
+          #grab file attributes on the real directory
+          my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,
+	$blksize,$blocks) = stat("/$dir");
+
+          #translate the mode/type to just the permissions mode
+          $mode = sprintf("%04o",$mode & 07777);
+
+          #if the directory doesn't exist in the recreated structure
+          unless (-d "${ROOTDIR}${dir}")
+          {
+            #make it, setting ownership and perms to the original's
+            #print "Mode: $mode\n";
+	    #print "mkdir ${ROOTDIR}${dir}"
+            mkdir("$ROOTDIR/$dir");
+            chown($uid,$gid,"$ROOTDIR/$dir");
+            chmod oct($mode), "$ROOTDIR/$dir";
+
+          }
+        }
+        
+        #by the time we get here, we know the parent directories exist
+        if ( $type eq "file")
+        {
+          #so it's time to copy the file if it's a file
+          print "Copying $file\n";
+#	  print "cp -vp \"$file\" \"${ROOTDIR}${file}\"\n"
+          system "cp -p \"$file\" \"${ROOTDIR}${file}\"";
+        }
+        else
+        {
+            #or if it's a directory,
+            if ( $type eq "dir")
+            {
+                #recreate it with the original perms/ownership
+                 my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,
+	$ctime,$blksize,$blocks) = stat("/$file");
+                 print "Creating $file\n";
+                  $mode = sprintf("%o",$mode & 07777);
+#		  print "cp -Rvp \"$file\" \"${ROOTDIR}${file}\"\n"
+		$file =~ s/\/$//; # Remove trailing solidus for cp sytax
+		 system "cp -Rnp \"$file\" \"${ROOTDIR}${file}\"";
+		# Recursively copy any new directories
+                 chown($uid,$gid,"${ROOTDIR}${file}");
+                 chmod oct($mode), "${ROOTDIR}${file}";
+
+            }
+            else
+            {
+                die( "How the heck did we get here?\n");
+            }
+        }
+  }
+}
+
+#after it loops through the log file, that's pretty much it, so it exits.

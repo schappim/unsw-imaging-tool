@@ -1,0 +1,144 @@
+#!/usr/bin/perl
+use Term::ANSIColor;
+
+require "./config/config.conf";    # This file has a list of Paths used
+
+printTitle();
+
+# Check for root level access before proceeding
+if ( $< != 0 ) {
+    displayError("Snapper must be run as root (or use sudo).");
+}
+
+# Check if we're passing the path to snapshot from shell
+if ( $ARGV[0] eq "" ) {
+    print "• Enter the Path you want to Snapshot:\n \$ ";
+    $_    = <STDIN>;
+    $path = $_;
+}
+else {
+    $path = $ARGV[0];
+}
+
+# Check if we're running in manual mode
+if ( $ARGV[1] eq "-m" ) {
+	$manual_mode = 1;
+}
+else {
+}
+
+# Remove carrage return from STDIN
+# Add forward Slash if Missing
+massagePath($path);
+
+# Check to see if Path Exists
+checkPathExists($path);
+
+
+print "• Confirm Snapshot of ";
+print color 'bold red';
+print "$path";
+print color 'reset';
+print " [Y/N]:";
+
+$_ = <STDIN>;
+
+$answer = $_;
+chomp($answer);
+
+if (   $answer eq "y"
+    || $answer eq "Y"
+    || $answer eq "Yes"
+    || $answer eq "yes"
+    || $answer eq "YES"
+    || $answer eq '' )
+{
+    print "• Creating Snapshot of $path\n";
+    $original = time;
+    `$logger -r $path ./tmp/$original.dat`;
+    print "• Snapshot complete\n";
+
+}
+else {
+    print "Ok Have it your way Biatch!\n\n";
+    exit();
+}
+print color 'bold';
+print "• Perform your Installation -";
+print color 'reset';
+print "\n  Please install and configure your software.";
+print "\n  When you are done, press ";
+print color 'bold';
+print "ENTER";
+print color 'reset';
+print " to continue.\n";
+print " \$ ";
+$_ = <STDIN>;
+print "\n Checking $path to see what you've installed... \n";
+$newTime = time;
+
+`sudo rm -rf ./tmp/$path`;
+`sudo $logger -r $path new.dat ./tmp/$original.dat > changes.txt`;
+
+$path = reverse; chop; $path = reverse;
+`sudo $packer ./changes.txt ./tmp/snapshot-$newTime`;
+`mv ./changes.txt ./tmp/snapshot-$newTime`;
+
+
+#`sudo $packer ./changes.txt ./tmp/$path-pkg`;
+`cat ./new.dat`;
+
+#remove new.dat
+
+`rm ./new.dat`;
+
+`sudo $mkdmg ./tmp/snapshot-$newTime $newTime`;
+
+`sudo mv ./tmp/snapshot-$newTime.dmg ./snapshots`;
+
+`sudo rm -rf ./tmp/*`;
+
+`open ./snapshots`;
+
+
+
+if ( $manual_mode == 1 ) {
+ #   `open ./tmp/$path-pkg`;
+}
+
+
+sub printTitle {
+	print "\n";
+}
+
+sub checkPathExists {
+	$path = shift;
+	if ( -d "$path" ) {
+	}
+	else {
+	    displayError("The path $path does not exist!");
+	}
+
+}
+
+sub massagePath {
+	$path = shift;
+	# Remove carrage return
+	chomp($path);    
+	$lastCharacterOfPath = substr $path, -1, 1;
+
+	# Add a forwardslash to the end if missing
+	if ( $lastCharacterOfPath ne '/' ) {
+	    $path = $path . '/';
+	}
+}
+
+sub displayError {
+    $errorText = shift;
+    print color 'bold red';
+    print "ERROR: ";
+    print color 'reset';
+    print "$errorText\n\n";
+    exit 1;
+
+}
