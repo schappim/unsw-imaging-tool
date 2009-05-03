@@ -27,6 +27,13 @@ if ( $ARGV[1] eq "-m" ) {
 else {
 }
 
+# Check if we're running in Home directory scanning
+if ( $ARGV[1] eq "-h" ) {
+	$home_dir_mode = 1;
+}
+else {
+}
+
 # Remove carrage return from STDIN
 # Add forward Slash if Missing
 massagePath($path);
