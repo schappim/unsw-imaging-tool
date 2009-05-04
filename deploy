@@ -1,0 +1,25 @@
+#!/usr/bin/perl
+use Term::ANSIColor;
+
+#Some Config
+require "./config/config.conf";    # This file has a list of Paths used
+$appName = "Deploy"; #
+
+checkForRoot($appName);
+
+sub checkForRoot{
+	$appName = shift;
+	if ( $< != 0 ) {
+	    displayError("$appName must be run as root (or use sudo).");
+	}
+}
+
+sub displayError {
+    $errorText = shift;
+    print color 'bold red';
+    print "ERROR: ";
+    print color 'reset';
+    print "$errorText\n\n";
+    exit 1;
+
+}

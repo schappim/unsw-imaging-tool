@@ -1,14 +1,16 @@
 #!/usr/bin/perl
 use Term::ANSIColor;
 
+#Some Config
 require "./config/config.conf";    # This file has a list of Paths used
+require "./lib/common_functions.pl";    # This file has a list of Paths used
+
+$appName = "Snapper"; #
 
 printTitle();
 
 # Check for root level access before proceeding
-if ( $< != 0 ) {
-    displayError("Snapper must be run as root (or use sudo).");
-}
+checkForRoot($appName);
 
 # Check if we're passing the path to snapshot from shell
 if ( $ARGV[0] eq "" ) {
@@ -113,39 +115,3 @@ if ( $manual_mode == 1 ) {
  #   `open ./tmp/$path-pkg`;
 }
 
-
-sub printTitle {
-	print "\n";
-}
-
-sub checkPathExists {
-	$path = shift;
-	if ( -d "$path" ) {
-	}
-	else {
-	    displayError("The path $path does not exist!");
-	}
-
-}
-
-sub massagePath {
-	$path = shift;
-	# Remove carrage return
-	chomp($path);    
-	$lastCharacterOfPath = substr $path, -1, 1;
-
-	# Add a forwardslash to the end if missing
-	if ( $lastCharacterOfPath ne '/' ) {
-	    $path = $path . '/';
-	}
-}
-
-sub displayError {
-    $errorText = shift;
-    print color 'bold red';
-    print "ERROR: ";
-    print color 'reset';
-    print "$errorText\n\n";
-    exit 1;
-
-}
