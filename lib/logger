@@ -1,106 +1,8 @@
 #!/usr/bin/perl
+require "./config/exclusions.conf";    # This file has a list of Paths used
+
 $| = 1;
 
-# COPYRIGHT 2005-2008
-# THE REGENTS OF THE UNIVERSITY OF MICHIGAN
-# ALL RIGHTS RESERVED
-#
-# PERMISSION IS GRANTED TO USE, COPY, CREATE DERIVATIVE WORKS AND 
-# REDISTRIBUTE THIS SOFTWARE AND SUCH DERIVATIVE WORKS FOR ANY PURPOSE,
-# SO LONG AS NO FEE IS CHARGED, AND SO LONG AS THE COPYRIGHT NOTICE
-# ABOVE, THIS GRANT OF PERMISSION, AND THE DISCLAIMER BELOW APPEAR IN
-# ALL COPIES MADE; AND SO LONG AS THE NAME OF THE UNIVERSITY OF MICHIGAN
-# IS NOT USED IN ANY ADVERTISING OR PUBLICITY PERTAINING TO THE USE 
-# OR DISTRIBUTION OF THIS SOFTWARE WITHOUT SPECIFIC, WRITTEN PRIOR
-# AUTHORIZATION.
-#
-# THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE
-# UNIVERSITY OF MICHIGAN AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT
-# WARRANTY BY THE UNIVERSITY OF MICHIGAN OF ANY KIND, EITHER EXPRESS OR
-# IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE REGENTS OF
-# THE UNIVERSITY OF MICHIGAN SHALL NOT BE LIABLE FOR ANY DAMAGES,
-# INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES,
-# WITH RESPECT TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE
-# USE OF THE SOFTWARE, EVEN IF IT HAS BEEN OR IS HEREAFTER ADVISED OF
-# THE POSSIBILITY OF SUCH DAMAGES.
-#
-# If you do make any changes, it would be appreciated if you submitted
-# them back to lsa-dev-osx@umich.edu
-
-# 
-# TODO: 
-# 	1. Clean up 'df -T nohfs' section 
-# 	2. Attempt to speed up logging 
-# 	3. Switch ugly command line argument for loop to 
-# 	   sexy getops Perl logic
-#   4. Add beer section to report extensive drunkenness
-#
-
-$myversion = "2.2"; # Increment this, but keep it in sync with the version
-                    # reported by the pkg file
-#
-# Change log
-# Jan 5, 2009 (2.2) 
-#   Variable cleanups: 
-# 		- removed $ARG_NUM
-# -------------
-# Dec 30, 2008 (2.1) (cdgrieb)
-#	Added logic to extract df information and shift into the 'ignore' array 
-#	(for network volume ignoring)
-#	Added logic to accept arguments for adding to 'ignore' array, I.E 
-#	--ignore and -i switches
-#   Implemented Perl GetOpts::Long functionality for command arguments
-# -------------
-# Sep 7, 2008 (2.0) (cdgrieb)
-#   Added --fork and -fork option (allows for ignore of resoruce forks) 
-#   Added logic to avoid checking on resource forks that are directories
-#   cleaned up command line argument parsing - removed massive 'if then' 
-#   statments and created a command line for loop
-# -------------
-# Mar 5, 2008 (1.9) (dpugh):
-#    Fixed a bug in file_lt that was only reporting one file diff in the case where 2 files shared a common substring.
-#    Example: /Library/foo and /Library/foobar would only report one of them
-# Feb 11, 2008 (1.8) (dpugh):
-#    Added --fast / -f option
-#    Added --all option
-#    Added --user / -u option
-#    Added --root / -r option
-#    Added filename to while-running output
-#    Added .fseventsd to ignore list
-# May 29, 2007 (1.7):
-#    Now checks for changes in resource forks, with help from Andrew Yaeger at citi
-#    Changed wording on summary output of files that have resource forks or special permissions
-# March 12, 2006:
-#    Added reporting of strange permissions
-#    Added file locking
-# July 28, 2005:
-#    Added /.Spotlight-V100/ to the ignore list for Tiger
-# Feb 25, 2004:
-#    Changed it to use the Digest module that ships with Perl
-#    Added "Checking File..." status counter
-#    Added POD documentation
-# Feb 16, 2004:
-#    Disabled copy files to target dir feature u
-#    Changed ignore list to ignore all of /Users instead of just $home
-#       so it won't search OTHER user's homedirs too
-#    Added ".vol" to ignore list
-# Jan 14, 2004:
-#    Added /afs/ to the ignore list
-# Jan 13, 2004:
-#    Added check to be sure you're running it as root
-#    Added check to be sure that MD5 open succeeds
-# Haven't logged changes before this... bummer...
-
-#print "\nlogGen  --  version $myversion\n";
-#print "Copyright 2005-2008 - The Regents of the University of Michigan\n";
-#print "All Rights Reserved\n";
-#print "\n";
-
-
-# 
-# First, check for root level access before proceeding 
-# 
 if ($< != 0) 
 {
   	print STDERR "\n";
@@ -150,21 +52,21 @@ $source_file_name = "";
 # 
 # Files and directories we really don't want to parse
 # 
-@ignore = sort (
-        "/Network/",
-        "/Temporary Items/",
-        "/Volumes/",
-        "/dev/",
-        "/private/Network/",
-        "/private/tmp/",
-        "/private/var/",
-        "/tmp/",
-        "/afs/",
-        "/.fseventsd/",
-        "/.vol/",
-        "/.Spotlight-V100/",
-		"/Users/"
-    	);
+#@ignore = sort (
+#        "/Network/",
+#        "/Temporary Items/",
+#        "/Volumes/",
+#        "/dev/",
+#        "/private/Network/",
+#        "/private/tmp/",
+#        "/private/var/",
+#        "/tmp/",
+#        "/afs/",
+#        "/.fseventsd/",
+#        "/.vol/",
+#        "/.Spotlight-V100/",
+#		"/Users/"
+#    	);
 
 # 
 # Stnadard usage function, pring help etc. 
@@ -197,7 +99,7 @@ sub print_usage
 GetOptions( 
 		   
 		   'forks' 	    => 	\$ignore_forks, 
-	  	   "i|ignore=s" =>  \@add_to_ignore,
+	  	 "i|ignore=s" =>  \@add_to_ignore,
 		   "r|root=s"   => 	\$rootdir, 
 		   'f|fast'     => 	\$fastchecksonly,
 		   'u|user'     =>	\$include_users,
@@ -218,7 +120,7 @@ if ( $do_all_checks == 1 )
 	       "/.fseventsd/",
 	       "/.vol/",
 	       "/.Spotlight-V100/",
-			"/Users/"
+					"/Users/"
 	
 	   	 			);	
 }	

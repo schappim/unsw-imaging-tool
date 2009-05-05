@@ -1,13 +1,14 @@
 #!/usr/bin/perl
-use Term::ANSIColor;
+use Term::ANSIColor; # This allows our code to be bold / coloured in the terminal
 
 #Some Config
 require "./config/config.conf";    # This file has a list of Paths used
-require "./lib/common_functions.pl";    # This file has a list of Paths used
+require "./lib/common_functions.pl";    # Some common functions 
 
-$appName = "Snapper"; #
+$appName = "Snapper"; # The name of this Application
 
-printTitle();
+
+printTitle(); # Print the title 
 
 # Check for root level access before proceeding
 checkForRoot($appName);
