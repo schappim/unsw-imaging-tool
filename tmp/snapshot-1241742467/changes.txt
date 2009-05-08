@@ -1,0 +1,12 @@
+5 new files:
+<new_files>
+/blah/fourth.txt
+/blah/somecrapfordemo.txt
+/blah/somemoretext.txt
+/blah/sometext.txt
+/blah/thethirdfile.txt
+</new_files>
+0 changed files
+0 deleted files
+0 files noted above have resource forks
+0 files noted above have special permissions

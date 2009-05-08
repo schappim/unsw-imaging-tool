@@ -14,6 +14,10 @@ volname = if ARGV.length == 0 then
         ARGV.shift
     end
 output = "#{dir}.dmg"
-
+output_rw = "#{dir}_rw.dmg"
 # dmg the folder
-`hdiutil create -fs HFS+ -srcfolder "#{dir}" -volname "#{volname}" "#{output}"`
+`hdiutil create -fs HFS+ -srcfolder "#{dir}" -volname "#{volname}" -format UDRW "#{output}"`
+
+#`hdiutil convert -format UDZO -o "#{output}" "#{output_rw}"`
+
+#`hdiutil convert "#{output}" -format UDRW UDIF -o "#{output_rw}"`
