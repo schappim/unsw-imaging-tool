@@ -1,0 +1,852 @@
+#!/usr/bin/perl
+$| = 1;
+
+# COPYRIGHT 2005-2008
+# THE REGENTS OF THE UNIVERSITY OF MICHIGAN
+# ALL RIGHTS RESERVED
+#
+# PERMISSION IS GRANTED TO USE, COPY, CREATE DERIVATIVE WORKS AND 
+# REDISTRIBUTE THIS SOFTWARE AND SUCH DERIVATIVE WORKS FOR ANY PURPOSE,
+# SO LONG AS NO FEE IS CHARGED, AND SO LONG AS THE COPYRIGHT NOTICE
+# ABOVE, THIS GRANT OF PERMISSION, AND THE DISCLAIMER BELOW APPEAR IN
+# ALL COPIES MADE; AND SO LONG AS THE NAME OF THE UNIVERSITY OF MICHIGAN
+# IS NOT USED IN ANY ADVERTISING OR PUBLICITY PERTAINING TO THE USE 
+# OR DISTRIBUTION OF THIS SOFTWARE WITHOUT SPECIFIC, WRITTEN PRIOR
+# AUTHORIZATION.
+#
+# THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE
+# UNIVERSITY OF MICHIGAN AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT
+# WARRANTY BY THE UNIVERSITY OF MICHIGAN OF ANY KIND, EITHER EXPRESS OR
+# IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE REGENTS OF
+# THE UNIVERSITY OF MICHIGAN SHALL NOT BE LIABLE FOR ANY DAMAGES,
+# INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES,
+# WITH RESPECT TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE
+# USE OF THE SOFTWARE, EVEN IF IT HAS BEEN OR IS HEREAFTER ADVISED OF
+# THE POSSIBILITY OF SUCH DAMAGES.
+#
+# If you do make any changes, it would be appreciated if you submitted
+# them back to lsa-dev-osx@umich.edu
+
+# 
+# TODO: 
+# 	1. Clean up 'df -T nohfs' section 
+# 	2. Attempt to speed up logging 
+# 	3. Switch ugly command line argument for loop to 
+# 	   sexy getops Perl logic
+#   4. Add beer section to report extensive drunkenness
+#
+
+$myversion = "2.2"; # Increment this, but keep it in sync with the version
+                    # reported by the pkg file
+#
+# Change log
+# Jan 5, 2009 (2.2) 
+#   Variable cleanups: 
+# 		- removed $ARG_NUM
+# -------------
+# Dec 30, 2008 (2.1) (cdgrieb)
+#	Added logic to extract df information and shift into the 'ignore' array 
+#	(for network volume ignoring)
+#	Added logic to accept arguments for adding to 'ignore' array, I.E 
+#	--ignore and -i switches
+#   Implemented Perl GetOpts::Long functionality for command arguments
+# -------------
+# Sep 7, 2008 (2.0) (cdgrieb)
+#   Added --fork and -fork option (allows for ignore of resoruce forks) 
+#   Added logic to avoid checking on resource forks that are directories
+#   cleaned up command line argument parsing - removed massive 'if then' 
+#   statments and created a command line for loop
+# -------------
+# Mar 5, 2008 (1.9) (dpugh):
+#    Fixed a bug in file_lt that was only reporting one file diff in the case where 2 files shared a common substring.
+#    Example: /Library/foo and /Library/foobar would only report one of them
+# Feb 11, 2008 (1.8) (dpugh):
+#    Added --fast / -f option
+#    Added --all option
+#    Added --user / -u option
+#    Added --root / -r option
+#    Added filename to while-running output
+#    Added .fseventsd to ignore list
+# May 29, 2007 (1.7):
+#    Now checks for changes in resource forks, with help from Andrew Yaeger at citi
+#    Changed wording on summary output of files that have resource forks or special permissions
+# March 12, 2006:
+#    Added reporting of strange permissions
+#    Added file locking
+# July 28, 2005:
+#    Added /.Spotlight-V100/ to the ignore list for Tiger
+# Feb 25, 2004:
+#    Changed it to use the Digest module that ships with Perl
+#    Added "Checking File..." status counter
+#    Added POD documentation
+# Feb 16, 2004:
+#    Disabled copy files to target dir feature u
+#    Changed ignore list to ignore all of /Users instead of just $home
+#       so it won't search OTHER user's homedirs too
+#    Added ".vol" to ignore list
+# Jan 14, 2004:
+#    Added /afs/ to the ignore list
+# Jan 13, 2004:
+#    Added check to be sure you're running it as root
+#    Added check to be sure that MD5 open succeeds
+# Haven't logged changes before this... bummer...
+
+print "\nlogGen  --  version $myversion\n";
+print "Copyright 2005-2008 - The Regents of the University of Michigan\n";
+print "All Rights Reserved\n";
+print "\n";
+
+
+# 
+# First, check for root level access before proceeding 
+# 
+if ($< != 0) 
+{
+  	print STDERR "\n";
+   	print STDERR "ERROR:\n";
+   	print STDERR "You must run this as root (or use sudo) so that it can correctly\n";
+   	print STDERR "detect any changes in files that only root can see.\n";
+   	print_usage();
+   	exit 1;
+}
+
+# 
+# Usages: 
+# 	- File::Spec for extraction of file info
+#   - Digest; data info for MD5
+# 	- Getop::Long; argument parsing 
+#
+use Digest;
+use File::Spec;
+use Fcntl qw( :flock :mode );
+use Getopt::Long;
+
+# 
+# Lets define some variables now 
+# (need to clean this section up - some are no longer used)
+# (<cdgrieb>)
+#
+
+$md5_object = Digest->MD5;
+$rootdir = "/";
+$firstrun = 1;
+$new_count = $deleted_count = 0;
+$printcount = 1;
+%questionable_files = ();
+@rsrc_forks = ();
+$ignore_forks = 0;	
+$include_users = 0;
+$fastchecksonly = 0;						
+$log_file_set = 0;
+$orig_file_index = 0;
+$do_all_checks = 0;
+$second_log_file_index = 0;
+$found_in_ary = "false";
+$log_file_name = "";
+$source_file_name = "";
+@add_to_ignore = ();
+
+# 
+# Files and directories we really don't want to parse
+# 
+@ignore = sort (
+        "/Network/",
+        "/Temporary Items/",
+        "/Volumes/",
+        "/dev/",
+        "/private/Network/",
+        "/private/tmp/",
+        "/private/var/",
+        "/tmp/",
+        "/afs/",
+        "/.fseventsd/",
+        "/.vol/",
+        "/.Spotlight-V100/",
+		"/Users/"
+    	);
+
+# 
+# Stnadard usage function, pring help etc. 
+# 
+
+sub print_usage 
+{
+	print STDERR "\n";
+  	print STDERR "Usage:\n";
+  	print STDERR "sudo /usr/local/sbin/logGen [--ignore|-i] [--all|-a] [--fast|-f] [--forks] [--root|-r <dir>] [--user|-u] [orig.dat]\n";
+  	print STDERR "sudo /usr/local/sbin/logGen [--ignore|-i] [--all|-a] [--fast|-f] [--forks] [--root|-r <dir>] [--user|-u] [new.dat] [orig.dat]\n";
+  	print STDERR "sudo /usr/local/sbin/logGen [--ignore|-i] [--all|-a] [--fast|-f] [--forks] [--root|-r <dir>] [--user|-u] [new.dat] [orig.dat] > changes.txt\n";
+  	print STDERR "\nOptions:\n";
+  	print STDERR "--ignore (or --i): Add a directory or file to the ignore listing (for example, -i /var/MyNFSShare)\n";
+  	print STDERR "--all (or --a): Check all directories, including /tmp, /var, etc.\n";
+  	print STDERR "--fast (or --f): Skips MD5 checks of files\n";
+  	print STDERR "--root <dir> (or --r <dir>): Sets root of the search to the specified directory.\n";
+  	print STDERR "--user (or --u): Includes the /Users directory in the scan.\n";
+  	print STDERR "--forks: Ignore resource forks - might cause logGen to skip critical files.\n";
+  	print STDERR "\n";
+  	print STDERR "FOR ADDITIONAL DOCUMENTATION, TYPE: perldoc /usr/local/sbin/logGen\n\n";
+  	exit 0;
+}
+
+# 
+# Next, check for command line arguments - if found, enter process loop 
+# to parse
+#
+
+GetOptions( 
+		   
+		   'forks' 	    => 	\$ignore_forks, 
+	  	   "i|ignore=s" =>  \@add_to_ignore,
+		   "r|root=s"   => 	\$rootdir, 
+		   'f|fast'     => 	\$fastchecksonly,
+		   'u|user'     =>	\$include_users,
+		   'a|all'	    =>  \$do_all_checks,
+		   'h|help'     =>  \&print_usage,
+		   '<>'         =>  \&get_logfile
+			
+			);
+
+if ( $do_all_checks == 1 )
+{
+	@ignore = sort(
+		
+	       "/Network/",
+	       "/Volumes/",
+	       "/private/Network/",
+	       "/afs/",
+	       "/.fseventsd/",
+	       "/.vol/",
+	       "/.Spotlight-V100/",
+			"/Users/"
+	
+	   	 			);	
+}	
+
+elsif ( $include_users == 1 )
+{
+	print STDERR "Including /Users/ within the scan...\n";
+	
+	# 
+	# Remove '/Users/' - we'll sort later
+	# 
+	pop(@ignore); 
+}
+
+# 
+# Extract df information containing non-HSF volumes - push into 'ignore' array (add slashes)
+# 	- also need to fix the silly "false" vairable (works but it's ugly as hell for Perl)
+# 	<cdgrieb>
+# 
+open (DFOUT, "/bin/df -T nohfs|") or print "darn - no DF ouput forsome reason...\n";
+while (<DFOUT>)
+{
+		$found = "false";
+		if ( $_ =~ m/\// )
+		{
+			# 
+			# We could combine this into two or less statments....
+			# 
+			$slash = "/";
+			chomp($vol = (split('\/', $_))[-1]);
+			$vol = $slash . $vol . $slash;	
+			
+			# 
+			# Only shift vol into ignore if it's not there
+			# 
+			foreach (@ignore)
+			{
+				if ( $_ eq $vol )
+				{
+					$found = "true";
+				}
+			}
+			
+			push(@ignore, $vol) unless $found eq "true";
+		}
+}
+
+foreach (@add_to_ignore)
+{
+	push(@ignore, $_);
+}
+
+@ignore = sort(@ignore);
+$log_file_name = time.".log" unless $log_file_name;
+
+# 
+# Start the check process...
+# 
+if ($source_file_name)
+{
+	print STDERR "Source found.....\n";
+    # Just count how many files are there
+    $firstrun = 0;
+    print STDERR " Counting files....\r";
+
+    # 
+    # Open the source file - exit if not found 
+    # 
+  
+    open( CMPSOURCE, "$source_file_name" ) || die( "No such file as $source_file_name." );
+    flock( CMPSOURCE, LOCK_SH );
+
+	#
+    # changed this from @arr = <CMPSOURCE>, $files = scalar @arr.  No reason to store all the files
+	#
+	while( <CMPSOURCE> ) 
+	{
+    	$totalcount++;
+    }
+
+   	seek( CMPSOURCE, 0, 0 );
+    print STDERR " .....\n";
+}
+
+open( LOGFILE, ">$log_file_name" ) || die( "Could not open logfile.\n" );
+flock( LOGFILE, LOCK_EX );
+
+&updateCmp();
+&traverse($rootdir);
+print LOGFILE "\n";
+
+close LOGFILE;
+close CMPSOURCE;
+&report();
+
+
+# 
+# Extract non-argument filenames....
+# 
+sub get_logfile
+{
+	if (! $log_file_name )
+	{
+		$log_file_name = $_[0];
+		print STDERR "Logfile is set to: $log_file_name\n";	
+	}
+	else
+	{
+		$source_file_name = $_[0];
+		print STDERR "Soure file is set to: $source_file_name\n";
+	}
+}
+
+sub checkPerms
+{
+	local $file = shift;
+	local $mode = (stat( "$file" ))[2];
+	local $rsrc_fork = (stat( "$file/..namedfork/rsrc" ))[7];
+
+	
+	$questionable_files{ $file } += 1 if( $mode & S_ISUID ); # set uid
+	$questionable_files{ $file } += 2 if( $mode & S_ISGID ); # set gid
+	$questionable_files{ $file } += 4 if( $mode & oct( 1000 ) ); # sticky bit
+	$questionable_files{ $file } += 8 if( $mode & S_IWOTH ); # world writable
+	push( @rsrc_forks, $file ) if( $rsrc_fork ); # has a resource fork
+}
+
+sub beginDir									# Subroutine for when just starting a directory
+{
+}
+
+sub file_lt									# Subroutine for new files
+{
+    if ((@new < 1) || ((index $_[0], $new[@new - 1]) != 0) || ($new[@new - 1] !~ /\/$/o)  )
+    {
+        push @new, $_[0];
+    }
+    $new_count++;
+    checkPerms( $_[0] ) unless $firstrun;
+    print LOGFILE "$_[0]\t".&mod_time($_[0])."\t".&checksum($_[0])."\n";
+}
+
+sub file_eq									# Subroutine for old (changed?) files
+{
+    if ($cmp_time eq &mod_time($_[0]))						# If unchanged...
+    {
+        print LOGFILE "$cmp_file\t$cmp_time\t$cmp_checksum\n";			# ...print to logfile
+    }
+    else
+    {
+        if (!$fastchecksonly && ($cmp_checksum eq &checksum($_[0])))					# If unchanged...
+        {
+            print LOGFILE "$cmp_file\t$cmp_time\t$cmp_checksum\n";		# ...print to logfile, else...
+        }
+        else
+        {
+            if ((substr $_[0],-1,1) ne "/")
+            {
+                push @changed, $_[0];
+            }
+	    checkPerms( $_[0] );
+            print LOGFILE "$_[0]\t".&mod_time($_[0])."\t".&checksum($_[0])."\n";# update and print to logfile
+        }
+    }
+    &updateCmp();							# update comparison
+}
+
+sub file_gt									# Subroutine for deleted file handling
+{
+    if ((@deleted < 1) || ((index $cmp_file, $deleted[@deleted - 1]) != 0))
+    {
+        push @deleted, $cmp_file;
+    }
+    $deleted_count++;
+    &updateCmp();
+    return &analyze(@_[0]);
+}
+
+sub updateCmp
+{
+    my $line = <CMPSOURCE>;
+    chomp $line;
+    ($cmp_file, $cmp_time, $cmp_checksum) = ($line =~ /^(.*)\t(.*)\t(.*)$/);
+    if (eof CMPSOURCE)
+    {
+        $cmp_file = "";
+    }
+}
+
+#### Non-customizable subroutines below
+
+sub traverse
+{
+    if (@ignore > 0)
+    {
+        return &analyzeWithIgnore($_[0]);				# Handle using @ignore array
+    }
+    return &analyzeWithoutIgnore($_[0]);				# Handle without @ignore array
+}
+
+sub traverseWithIgnore
+{
+    return &analyzeWithIgnore(&readDirAndPrepList($_[0]));		# Read the dir, and process entries
+}
+
+sub traverseWithoutIgnore
+{
+    return &analyzeWithoutIgnore(&readDirAndPrepList($_[0]));		# Read the dir, and process entries
+}
+
+sub readDirAndPrepList
+{
+    &beginDir($_[0]);
+    
+    #opendir WORKING_DIR, "$_[0]";
+    #my @files = readdir WORKING_DIR;					# Get the file list
+    #closedir WORKING_DIR;
+    
+    my @returnables = ();
+    
+    opendir( WORKING_DIR, "$_[0]" );
+    while( defined( $file = readdir( WORKING_DIR ) ) )
+    {
+        if (($file ne ".") && ($file ne ".."))				# If the file doesn't point here or up...
+        {
+            $file = "$_[0]$file";
+            if ((-d "$file") && !(-l "$file"))				#	If it's a directory...
+            {
+                $file = "$file/";					#	...add a /
+            }
+            push @returnables, "$file";					# ...add it to the returnables array
+          
+	    	# 
+	    	# Only check for a resource fork if it's not a directory and the 
+	    	# "--ignore-forks" switch is not given 
+	    	# 
+   	    	if ( !( -d "$file") && (-s "$file/..namedfork/rsrc" ))
+	    	{
+	    	 	if ( $ignore_forks == 1 )
+		  	 	{
+					push @returnables, "$file/..namedfork/rsrc";
+	    	 	}
+	    	}
+	     
+            # Check for a resource fork - if present, add it to the list
+            # if (-s "$file/..namedfork/rsrc" )
+            # {
+            #    push @returnables, "$file/..namedfork/rsrc";
+            # }
+
+        }
+    }
+
+    closedir( WORKING_DIR );
+    return (sort @returnables);								# return everything in alphabetical order
+}
+
+sub analyzeWithIgnore
+{
+    while ((@ignore > 0) && (@_ > 0))						# While there are file and ignore entries
+    {
+        my $file = shift @_;
+        while (($ignore[0] lt $file) && (@ignore > 0))		#	when ignore should have happend b4..
+        {
+            shift @ignore;						            #	..ignore it.
+            if (@ignore < 1)
+            {
+                unshift @_, $file;							#	If that's the last ignore
+                return &analyzeWithoutIgnore(@_);			#	Analyze without it!
+            }
+        }
+		
+        if ($ignore[0] eq $file)
+        {
+            shift @ignore;									#	When the file should be ignored, do so.
+            if (@ignore < 1)
+            {
+                return &analyzeWithoutIgnore(@_);			#	If thats it, analyze without!
+            }
+        }
+        else
+        {
+            &analyze($file);								#	Otherwise, deal with it.
+            if ((substr $file, -1, 1) eq "/")
+            {
+                &traverseWithIgnore($file);					#	If it's a directory deal with that too.
+            }
+        }
+    }
+
+    if (@_ > 0)
+    {
+        return &analyzeWithoutIgnore(@_);
+    }
+}
+
+sub analyzeWithoutIgnore
+{
+    while (@_ > 0)
+    {
+        my $file = shift @_;						# Analyze every file...
+        &analyze($file);
+        if ((substr $file, -1, 1) eq "/")
+        {
+            &traverseWithoutIgnore($file);				# ...and all directories
+        }
+    }
+}
+
+sub analyze
+{
+
+     #### PRINT FILE COUNT
+     unless ($printcount++ % 100) {
+        if ($totalcount) {
+          $pf=sprintf("%-39.39s",$_[0]);
+          print STDERR "  Checking File: $printcount of $totalcount (".int($printcount/$totalcount*100)."%) $pf\r";
+        } else {
+          $pf=sprintf("%-56.56s",$_[0]);
+          print STDERR "  Checking File: $printcount $pf\r";
+        }
+     }
+
+    if ($cmp_file eq "")
+    {
+        return &file_lt($_[0]);
+    }
+
+
+    my $switch = ($_[0] cmp $cmp_file);
+    if ($switch < 0)
+    {
+        return &file_lt($_[0]);						# File is less than...
+    }
+    elsif ($switch > 0)
+    {
+        return &file_gt($_[0]);						# File is greater than...
+    }
+    return &file_eq($_[0]);						# File is equal to...
+}
+
+sub mod_time
+{
+    my ($file) = @_;
+    return (stat "$file")[9];				# Modtime!
+}
+
+sub checksum
+{
+    my ($file) = @_;
+
+    return "noMD5" if $fastchecksonly;
+
+    #print "DEBUGchecksum:$file\n";
+    # Need to do the -s option below in order to deal with files which
+    # ONLY have a resource fork, otherwise the MD5_FILE fails
+    if ((-f "$file") && (-s "$file"))
+    {							# If we've got a normal file...
+        unless (open MD5_FILE, "$file") {		# Open it
+           return "MD5: could not open file";
+        }
+        binmode MD5_FILE;				# Put it in binary mode
+        $md5_object->addfile(MD5_FILE);			# Read data into Digest::MD5 object
+        close MD5_FILE;					# Close it
+        return "MD5: ".$md5_object->b64digest;		# Return the base-64 MD5 Checksum
+    }
+    if (-l "$file")					# Otherwise, return what it is....
+    {
+        return "symlink -> ".(readlink "$file");	# symbolic link?
+    }
+    if (-d "$file")
+    {
+        return "directory";				# directory?
+    }
+        if (-S "$file")
+    {
+        return "socket";				# socket?
+    }
+    if (-p "$file")
+    {
+        return "pipe";					# named pipe?
+    }
+    if (-b "$file")
+    {
+        return "block";					# block device?
+    }
+    if (-c "$file")
+    {
+        return "raw";					# character device?
+    }
+    return "dunno";					# anything else?
+}
+
+sub report
+{
+
+    # print one last time to top off the numbers
+    if ($totalcount) {
+       print STDERR "  Checking File: $printcount of $totalcount (100%)         \n"; 
+    } else {
+       print STDERR "  Checking File: $printcount                       \n"; 
+    }
+
+    print $new_count." new files";
+    if (@new > 0)
+    {
+        print ":\n-------------------------\n";
+        foreach my $file (@new)
+        {
+            print "$file\n";
+        }
+        print "-------------------------";
+    }
+    print "\n".@changed." changed files";
+    if (@changed > 0)
+    {
+        print ":\n-------------------------\n";
+        foreach my $file (@changed)
+        {
+            print "$file\n";
+        }
+        print "-------------------------";
+    }
+    print "\n".$deleted_count." deleted files";
+    if (@deleted > 0)
+    {
+        print ":\n-------------------------\n";
+        foreach my $file (@deleted)
+        {
+            print "$file\n";
+        }
+        print "------------------------";
+    }
+    print "\n".scalar( @rsrc_forks )." files noted above have resource forks";
+    if (scalar( @rsrc_forks ) > 0) {
+        print ":\n---------------\n";
+        for( sort @rsrc_forks ){
+            print "$_\n";
+        }
+        print "------------------------";
+    }
+    print "\n".scalar( keys %questionable_files )." files noted above have special permissions";
+    if (scalar( keys %questionable_files ) > 0)
+    {
+        print ":\n------------------------\n";
+        foreach my $file ( sort keys %questionable_files )
+        {
+	    $mode = $questionable_files{ $file };
+            print "$file ( ";
+	    print "setuid " if( $mode & 1 );
+	    print "setgid " if( $mode & 2 );
+	    print "sticky_bit " if( $mode & 4 );
+	    print "world_writable " if( $mode & 8 );
+	    print ")\n";
+        }
+        print "-----------------------";
+    }
+    	print "\n";
+}
+
+__END__
+
+=head1 NAME
+
+logGen - report filesystem changes
+
+=head1 SYNOPSYS
+
+sudo logGen [--forks|-f] [--ignore|-i] [--all|-a] [--fast|-f] [--root|-r <dir>] [--user|-u] [orig.dat]
+
+sudo logGen [--forks|-f] [--ignore|-i] [--all|-a] [--fast|-f] [--root|-r <dir>] [--user|-u] [new.dat] [orig.dat]
+
+sudo logGen [--forks|-f] [--ignore|-i] [--all|-a] [--fast|-f] [--root|-r <dir>] [--user|-u] [new.dat] [orig.dat] > changes.txt
+
+=head1 DESCRIPTION
+
+logGen can be used to detect what files have changed as a result of a
+configuration change or installing a package.  It accomplishes this
+by utilizing a number of methods, but mostly using the modification
+date and a checksum of each file.
+Lists will be generated for files that are added, changed, 
+or deleted, and will include only the directory if everything
+within it has been added, changed, or deleted.  A number of directories
+are automatically ignored in the search including your home directory,
+temporary directories, network mounts, and non-root volumes.
+
+As with many tools, logGen cannot accurately detect changes in resource forks
+of files.
+
+Before performing any changes or installations you'd like to detect, take
+a baseline snapshot of the filesystem by running:
+
+    sudo /usr/local/sbin/logGen orig.dat
+
+This will write out a data file (orig.dat) containing a listing of each
+file and the information logGen has recorded about each file.  This first
+pass can taken a very long time (even upwards of 30 minutes) depending on
+the speed of your machine and the number of files on your disk.
+
+Next, make the changes you'd like to detect, such as a preference change,
+installing new software, etc, and run logGen a second time.  It is 
+recommended (although not required) to redirect STDOUT to a file for
+later examination.
+
+    sudo /usr/local/sbin/logGen new.dat orig.dat > changes.txt
+
+This will write out a new data file (new.dat) containing a new, current
+listing of each file and the information logGen has recorded about each
+file.  Next, the data is compared between the new.dat and orig.dat files
+and the changes are summarized and printed to STDOUT, and in this example
+saved to changes.txt.  This second execution of logGen generally takes
+much less time than the first.
+
+All of the filenames are changable.  If you omit a filename for the
+original data file (orig.dat in the above examples) it will default to
+<currentEpochTime>.log, such as "1076949440.log".
+
+=head1 OPTIONS
+
+Three options are available:
+--ignore (or -i): Add a directory or file to the ignore listing (for example, -i /network-share/). 
+Be sure to include the full directory name with both slashes (/Applications/, or /my_nfs_share/).
+Multipe '--ignore' switches can be given.
+
+--forks (or -forks): Ignore resource forks - might cause logGen to skip critical files. 
+Reduces logging and speeds up logGen process slighty. 
+
+--all (or -a): Check all directories, including /tmp, /var, etc.  This still
+ignores things like /Network and /Volumes, though, to avoid checking
+lots of things you really shouldn't check.
+
+--fast (or -f): Skips MD5 checks of files - the only downside to this is that
+files whose timestamps have changed but whose contents remain identical
+will be reported as changed even though they didn't.
+
+--root <dir> (or -r <dir>): Sets the root directory of the search to the specified
+directory.  This could be useful if, for example, you're just looking
+for what preference changed in /Library/Preferences/
+
+--user (or -u): Includes the /Users directory in the scan.  Normally this directory
+is ignored.
+
+The order of the options DOES matter - 
+They should be typed in the same order as they are listed here.  
+I felt lazy programming that day... Sorry.
+
+=head1 EXAMPLE
+
+ % sudo /usr/local/sbin/logGen orig.dat
+
+ logGen  --  version 2.1
+ Copyright 2003 - 2008 - The Regents of the University of Michigan
+ All Rights Reserved
+
+ 361883 new files:
+ ---------------
+ /
+ ---------------
+ 0 changed files
+ 0 deleted files
+ 0 files with resource forks
+ 0 files with special permissions
+
+ % sudo /usr/local/sbin/logGen new.dat orig.dat
+
+ logGen  --  version 2.1
+ Copyright 2003 - The Regents of the University of Michigan
+ All Rights Reserved
+
+ 1 new files:
+ ---------------
+ /Library/NewDir/
+ ---------------
+ 1 changed files:
+ ---------------
+ /Library/TestDir2/someFile
+ ---------------
+ 1 deleted files:
+ ---------------
+ /Library/TestDir/
+ ---------------
+ 1 files with resource forks:
+ ---------------
+ /Library/iconFile
+ ---------------
+ 2 files with special permissions:
+ ---------------
+ /Library/aFileSetUID ( setuid )
+ /Library/anotherFile ( setgid world_writable )
+ ---------------
+
+=head1 AUTHORS
+
+Originally written by Phil Holland at the University of Michigan.
+Numerous changes provided by Dave Pugh at the University of Michigan.
+Other numerous changes provided by Chris Grieb at the University of Michigan.
+Questions, requests, comments, and code changes should be sent
+to lsa-dev-osx@umich.edu
+
+
+=head1 COPYRIGHT
+
+COPYRIGHT 2005-2008
+THE REGENTS OF THE UNIVERSITY OF MICHIGAN
+ALL RIGHTS RESERVED
+
+PERMISSION IS GRANTED TO USE, COPY, CREATE DERIVATIVE WORKS AND 
+REDISTRIBUTE THIS SOFTWARE AND SUCH DERIVATIVE WORKS FOR ANY PURPOSE,
+SO LONG AS NO FEE IS CHARGED, AND SO LONG AS THE COPYRIGHT NOTICE
+ABOVE, THIS GRANT OF PERMISSION, AND THE DISCLAIMER BELOW APPEAR IN
+ALL COPIES MADE; AND SO LONG AS THE NAME OF THE UNIVERSITY OF MICHIGAN
+IS NOT USED IN ANY ADVERTISING OR PUBLICITY PERTAINING TO THE USE 
+OR DISTRIBUTION OF THIS SOFTWARE WITHOUT SPECIFIC, WRITTEN PRIOR
+AUTHORIZATION.
+
+THIS SOFTWARE IS PROVIDED AS IS, WITHOUT REPRESENTATION FROM THE
+UNIVERSITY OF MICHIGAN AS TO ITS FITNESS FOR ANY PURPOSE, AND WITHOUT
+WARRANTY BY THE UNIVERSITY OF MICHIGAN OF ANY KIND, EITHER EXPRESS OR
+IMPLIED, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE REGENTS OF
+THE UNIVERSITY OF MICHIGAN SHALL NOT BE LIABLE FOR ANY DAMAGES,
+INCLUDING SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES,
+WITH RESPECT TO ANY CLAIM ARISING OUT OF OR IN CONNECTION WITH THE
+USE OF THE SOFTWARE, EVEN IF IT HAS BEEN OR IS HEREAFTER ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGES.
+
+If you do make any changes, it would be appreciated if you submitted
+them back to lsa-dev-osx@umich.edu
+
+
+=cut

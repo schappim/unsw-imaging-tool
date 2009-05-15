@@ -1,5 +1,6 @@
 #!/usr/bin/perl
 use Term::ANSIColor;
+use Switch;
 
 #Some Config
 require "./config/config.conf";    # This file has a list of Paths used
@@ -9,12 +10,77 @@ $version = "0001";	 # Version
 # Check for root level access before proceeding
 checkForRoot($appName);
 
+# Check to see if we're parsing an image file
+if ( $ARGV[0] eq "" ) {
+	  displayError("$appName requires image file as argument");
+}
+else {
+    $imageFile = $ARGV[0];
+}
+
+switch ($ARGV[0]) {
+	case '-h'			{ print "Usage: ./deploy <imageFile.dmg>\n"; exit(); }
+	case 'h'			{ print "Usage: ./deploy <imageFile.dmg>\n"; exit(); }
+	case 'H'			{ print "Usage: ./deploy <imageFile.dmg>\n"; exit(); }
+	case 'help'		{ print "Usage: ./deploy <imageFile.dmg>\n"; exit(); }
+	case '-help'	{ print "Usage: ./deploy <imageFile.dmg>\n"; exit(); }
+	case 'Help'		{ print "Usage: ./deploy <imageFile.dmg>\n"; exit(); }
+}
+
+
 sub checkForRoot{
 	$appName = shift;
 	if ( $< != 0 ) {
 	    displayError("$appName must be run as root (or use sudo).");
 	}
 }
+
+ 
+###Mount the disk image path passed from the file###
+
+	# Check if image on path exists
+		checkPathExists($imageFile);
+			
+	# Index /Volumes for a first time
+	$dirtoget="/Volumes/";
+	opendir(IMD, $dirtoget) || die("Cannot open directory");
+	@thefiles= readdir(IMD);
+	closedir(IMD);
+
+	foreach $f (@thefiles)
+	{
+	 unless ( ($f eq ".") || ($f eq "..") )
+	 { 
+	  #print "$f\n";
+	 }
+	}
+	# Mount the image
+	
+	$cmd = 'open ./blah.dmg'; 
+	system $cmd;
+	
+	sleep(10); # Sleep the script, hopefully the disk image will be mounted by the time we wake up... 
+	
+	
+	# Reindex /Volumes to see what the changes were
+	
+	#mount the dmg
+	$dirtoget="/Volumes/";
+	opendir(IMD, $dirtoget) || die("Cannot open directory");
+	@thefiles2= readdir(IMD);
+	closedir(IMD);
+	
+	# Put the results differences between the two indexes into an array
+	for $i (@thefiles2) {
+	   print "$i\n" if ! grep {$i == $_} @thefiles;
+	}
+	# Check to see if there array has more than one element (if it does, we've picked up more than one item)
+		
+	# Pull the new volume name out and assign it to a variable name 
+
+
+
+
 
 sub displayError {
     $errorText = shift;
@@ -25,3 +91,5 @@ sub displayError {
     exit 1;
 
 }
+
+

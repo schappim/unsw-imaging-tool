@@ -5,7 +5,7 @@ use Term::ANSIColor; # This allows our code to be bold / coloured in the termina
 require "./config/config.conf";    # This file has a list of Paths used
 require "./lib/common_functions.pl";    # Some common functions 
 
-$appName = "Snapper"; # The name of this Application
+$appName = "supersnapper"; # The name of this Application
 
 
 printTitle(); # Print the title 
@@ -101,13 +101,16 @@ $path = reverse; chop; $path = reverse;
 `sudo $packer ./changes.txt ./tmp/snapshot-$newTime`;
 `mv ./changes.txt ./tmp/snapshot-$newTime`;
 
+`mkdir ./dir-snaps/snapshot-$newTime`;
 
-#`sudo $packer ./changes.txt ./tmp/$path-pkg`;
+`cp -R ./tmp/snapshot-$newTime/* ./dir-snaps/snapshot-$newTime/`;
+
+
 `cat ./new.dat`;
 
 #remove new.dat
 
-#`rm ./new.dat`;
+`rm ./new.dat`;
 
 `sudo $mkdmg ./tmp/snapshot-$newTime $newTime`;
 
@@ -118,9 +121,9 @@ $path = reverse; chop; $path = reverse;
 
 `sudo hdiutil attach -readwrite ./snapshots/snapshot-$newTime.dmg`;
 
-#`sudo rm -rf ./tmp/*`;
+`sudo rm -rf ./tmp/*`;
 
-`open ./snapshots`;
+#`open ./snapshots`;
 
 `chmod 777 ./snapshots`;
 

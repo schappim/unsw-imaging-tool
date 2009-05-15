@@ -1,4 +1,19 @@
-#!/usr/bin/perl 
+#!/usr/bin/perl
+# pkgGen v1
+# Zack Smith
+# Based on a script originally created by Geoff Franks (Buy him the Beer)
+# Hauptman-Woodward Medical Research Institute
+# 
+# This script takes two parameters. The first is the path to the 
+# LogGen > log file. The second is the folder which you would like to 
+# create your Root directory for the PKG installer to base from. This folder 
+# MUST NOT exist, or the script will fail. 
+#
+# It parses the log file, regenerating the drectory structure of added files 
+# and directories, preserving permissions, modification times, and resource 
+# forks as tightly as possible. IMPORTANT: To preserve all permissions, run this
+# with root level permissions. 
+# More to come later...
 
 use strict;
 
@@ -10,7 +25,7 @@ my $ROOTDIR;
 my @loglines;
 #function for warn about usage and exit 
 sub usage{
-  warn "Usage: paker <path to logGen output txt file> <path of pkg fauxroot>\n";
+  warn "Usage: pkgGen <path to logGen output txt file> <path of pkg fauxroot>\n";
   exit(1);
 }
 
@@ -128,7 +143,7 @@ for my $line (@loglines)
         {
           #so it's time to copy the file if it's a file
           print "Copying $file\n";
-					#	  print "cp -vp \"$file\" \"${ROOTDIR}${file}\"\n"
+#	  print "cp -vp \"$file\" \"${ROOTDIR}${file}\"\n"
           system "cp -p \"$file\" \"${ROOTDIR}${file}\"";
         }
         else
